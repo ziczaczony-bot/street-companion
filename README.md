@@ -49,6 +49,17 @@ See [docs/INSTALL_IPHONE.md](docs/INSTALL_IPHONE.md): free install from a Mac wi
 - Lane detection needs visible lane markings. At night, in rain, on worn or missing markings and in road works it may show no lane or the wrong one. The lane count comes from OpenStreetMap and can be missing.
 - Speed limits come from OpenStreetMap volunteers. They can be missing or out of date, and temporary limits (road works, electronic signs) are not included. Road signs always win.
 
+## Two phones: camera at the windshield, screen where you like
+
+An old phone can be the camera, so your main phone can sit somewhere comfortable.
+
+1. Install the app on both phones.
+2. Main phone: **Einstellungen → Zwei Handys → Anzeige-Handy**. Turn on its **personal hotspot** (mobile data keeps working, so speed limits still load).
+3. Old phone: connect it to the main phone's hotspot, then choose **Einstellungen → Zwei Handys → Kamera-Handy**. Mount it at the windshield behind the mirror and plug it into a charger.
+4. The camera phone shows **Verbunden** (green) when the main phone hears it. Its screen goes dark after 20 seconds to stay cool; tap to wake it.
+
+Only the detection results (a few hundred bytes, about 5 times a second) are sent between the phones, never pictures. If the phones do not find each other, type the address shown on the main phone into **Adresse des Anzeige-Handys** on the camera phone. An old phone is slower (an iPhone SE from 2016 probably manages only 2 to 3 updates per second), so the vehicle view reacts a bit later.
+
 ## What is not in this first version
 
 Following the feasibility analysis: no traffic-light detection, no recording, no speed-camera warnings (not allowed in Germany, § 23 Abs. 1c StVO), no iPhone App Store / TestFlight build (install from a Mac instead).

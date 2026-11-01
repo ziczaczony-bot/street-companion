@@ -4,11 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/lanes.dart';
+import '../core/link.dart';
 import '../core/road_map.dart';
 import '../core/speed_limit.dart';
 import '../core/vehicles.dart';
 import 'alerts.dart';
 import 'brightness.dart';
+import 'camera_link.dart';
 import 'demo.dart';
 import 'location_service.dart';
 import 'settings.dart';
@@ -23,6 +25,7 @@ class DriveController extends ChangeNotifier {
   final location = LocationService();
   final limits = SpeedLimitService();
   final detector = VehicleDetector();
+  final receiver = LinkReceiver();
   final alerts = Alerts();
   final brightness = AutoBrightness();
   final _overspeed = OverspeedTracker();
@@ -50,11 +53,23 @@ class DriveController extends ChangeNotifier {
   int inferenceMs = 0;
   bool get demo => settings.demoMode;
 
+  /// Display phone: vehicles and lanes come from the camera phone.
+  bool get remoteCamera => settings.role == DeviceRole.display && !settings.demoMode;
+
+  /// Camera state for the status icon, local or remote.
+  CameraStatus get cameraStatus {
+    if (!remoteCamera) return detector.status;
+    if (receiver.error != null) return CameraStatus.error;
+    return receiver.connected ? CameraStatus.running : CameraStatus.starting;
+  }
+
   bool get showDepartureBanner =>
       departureAlertAt != null && DateTime.now().difference(departureAlertAt!) < const Duration(seconds: 4);
 
   StreamSubscription<GpsFix>? _gpsSub;
   StreamSubscription<FrameResult>? _camSub;
+  StreamSubscription<LinkFrame>? _linkSub;
+  Timer? _linkTimer;
   Timer? _demoTimer;
   Timer? _brightnessTimer;
   DemoDrive? _demo;
@@ -86,6 +101,9 @@ class DriveController extends ChangeNotifier {
     _brightnessTimer?.cancel();
     await _gpsSub?.cancel();
     await _camSub?.cancel();
+    await _linkSub?.cancel();
+    _linkTimer?.cancel();
+    await receiver.stop();
     await location.stop();
     await detector.stop();
     await brightness.reset();
@@ -119,7 +137,18 @@ class DriveController extends ChangeNotifier {
   Future<void> _startSensors() async {
     gpsStatus = await location.start();
     _gpsSub = location.fixes.listen(_onFix);
-    if (settings.cameraEnabled) {
+    if (remoteCamera) {
+      await receiver.start();
+      _linkSub = receiver.frames.listen(_onLinkFrame);
+      // Camera phone gone (out of battery, hotspot off): clear old cars.
+      _linkTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!receiver.connected && road.isNotEmpty) {
+          road = const [];
+          lanes = _lanes.update(LaneObservation.empty, osmCount: _osmLanes);
+          notifyListeners();
+        }
+      });
+    } else if (settings.cameraEnabled) {
       detector.rotationOverride = settings.cameraRotation;
       await detector.start();
       _camSub = detector.results.listen(_onFrame);
@@ -196,6 +225,14 @@ class DriveController extends ChangeNotifier {
     lanes = _lanes.update(r.lanes, osmCount: _osmLanes);
     notifyListeners();
   }
+
+  void _onLinkFrame(LinkFrame f) => _onFrame(FrameResult(
+        detections: f.detections,
+        lanes: f.lanes,
+        luma: f.luma,
+        camera: CameraModel(f.aspect),
+        inferenceMs: f.inferenceMs,
+      ));
 
   void _applyFrame(List<Detection> dets, CameraModel camera) {
     road = placeOnRoad(dets, camera: camera);

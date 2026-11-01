@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/link.dart';
+import '../services/camera_link.dart';
 import '../services/settings.dart';
 import 'theme.dart';
 
@@ -15,6 +17,53 @@ class SettingsScreen extends StatelessWidget {
       body: ListenableBuilder(
         listenable: s,
         builder: (context, _) => ListView(children: [
+          const _Header('Zwei Handys'),
+          ListTile(
+            title: const Text('Dieses Handy ist'),
+            subtitle: Text(switch (s.role) {
+              DeviceRole.single => 'Kamera und Anzeige auf einem Handy',
+              DeviceRole.camera => 'An der Scheibe: erkennt Autos und sendet sie',
+              DeviceRole.display => 'Zeigt alles an, Autos kommen vom Kamera-Handy',
+            }),
+            trailing: DropdownButton<DeviceRole>(
+              value: s.role,
+              items: const [
+                DropdownMenuItem(value: DeviceRole.single, child: Text('Ein Handy')),
+                DropdownMenuItem(value: DeviceRole.camera, child: Text('Kamera-Handy')),
+                DropdownMenuItem(value: DeviceRole.display, child: Text('Anzeige-Handy')),
+              ],
+              onChanged: (v) => s.role = v ?? DeviceRole.single,
+            ),
+          ),
+          if (s.role == DeviceRole.display)
+            FutureBuilder<List<String>>(
+              future: localAddresses(),
+              builder: (context, snap) {
+                final ips = snap.data ?? const [];
+                return ListTile(
+                  title: const Text('So verbinden'),
+                  subtitle: Text('Hotspot an diesem Handy einschalten und das Kamera-Handy damit verbinden. '
+                      'Das Kamera-Handy findet dieses Handy dann von selbst.\n'
+                      'Adresse dieses Handys: ${ips.isEmpty ? '– (Hotspot oder WLAN einschalten)' : ips.join(', ')}'),
+                );
+              },
+            ),
+          if (s.role == DeviceRole.camera)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextFormField(
+                initialValue: s.linkHost,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Adresse des Anzeige-Handys (optional)',
+                  helperText: 'Leer lassen = automatisch über den Hotspot. Nur ausfüllen, wenn es nicht klappt.',
+                  helperMaxLines: 2,
+                ),
+                onChanged: (v) {
+                  if (v.trim().isEmpty || isIpv4(v)) s.linkHost = v;
+                },
+              ),
+            ),
           const _Header('Tempo'),
           ListTile(
             title: const Text('Warnen ab'),

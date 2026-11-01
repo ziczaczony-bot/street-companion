@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/link.dart';
+
 /// User settings, saved on the phone.
 class Settings extends ChangeNotifier {
   Settings._(this._p);
@@ -40,9 +42,22 @@ class Settings extends ChangeNotifier {
   bool get demoMode => _p.getBool('demo') ?? false;
   set demoMode(bool v) => _set('demo', v);
 
+  /// One phone, or camera phone / display phone in two-phone mode.
+  DeviceRole get role {
+    final i = _p.getInt('role') ?? 0;
+    return i >= 0 && i < DeviceRole.values.length ? DeviceRole.values[i] : DeviceRole.single;
+  }
+
+  set role(DeviceRole v) => _set('role', v.index);
+
+  /// Camera phone: address of the display phone; empty = automatic.
+  String get linkHost => _p.getString('linkHost') ?? '';
+  set linkHost(String v) => _set('linkHost', v.trim());
+
   void _set(String k, Object v) {
     if (v is bool) _p.setBool(k, v);
     if (v is int) _p.setInt(k, v);
+    if (v is String) _p.setString(k, v);
     notifyListeners();
   }
 }
