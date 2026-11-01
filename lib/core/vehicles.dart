@@ -54,33 +54,114 @@ class RoadObject {
   VehicleKind get kind => detection.kind;
 }
 
-/// Converts detections to positions on the road.
-/// [portrait] tells whether the upright camera image is taller than wide,
-/// which changes the horizontal field of view.
-List<RoadObject> placeOnRoad(List<Detection> dets, {required bool portrait}) {
-  // focal length in units of image width: f = 0.5 / tan(hfov / 2)
-  final f = portrait ? 1.07 : 0.78; // ~50° vs ~65° horizontal FOV
-  final lead = selectLead(dets);
+/// Simple pinhole model of the phone camera.
+class CameraModel {
+  const CameraModel(this.aspect);
+
+  /// Upright image width / height.
+  final double aspect;
+  static const landscape = CameraModel(4 / 3);
+
+  bool get portrait => aspect < 1;
+
+  /// Focal length in units of image width: f = 0.5 / tan(hfov / 2)
+  /// (~65° horizontal field of view in landscape, ~50° in portrait).
+  double get fx => portrait ? 1.07 : 0.78;
+
+  /// Focal length in units of image height.
+  double get fy => fx * aspect;
+
+  /// Height of the camera above the road (m).
+  static const mountHeight = 1.25;
+}
+
+/// Real-world height used to estimate distance from box height. Height
+/// stays right when a car is seen from the side, unlike width.
+double typicalHeightM(VehicleKind k) => switch (k) {
+      VehicleKind.car => 1.5,
+      VehicleKind.truck => 3.4,
+      VehicleKind.bus => 3.1,
+      VehicleKind.motorcycle => 1.4,
+      VehicleKind.bicycle => 1.7,
+      VehicleKind.person => 1.7,
+    };
+
+/// Converts detections to positions on the road (metres from the camera).
+List<RoadObject> placeOnRoad(List<Detection> dets, {CameraModel camera = CameraModel.landscape}) {
+  final lead = selectLead(dets, camera: camera);
   final out = <RoadObject>[];
+  final fx = camera.fx, fy = camera.fy;
   for (final d in dets) {
-    if (d.width <= 0.01) continue;
-    final dist = (typicalWidthM(d.kind) * f / d.width).clamp(2.0, 120.0);
-    final lateral = (d.centerX - 0.5) / f * dist;
+    if (d.width <= 0.01 || d.height <= 0.01) continue;
+    final dW = typicalWidthM(d.kind) * fx / d.width;
+    final dH = typicalHeightM(d.kind) * fy / d.height;
+    final cutTop = d.top < 0.01;
+    final cutSide = d.left < 0.01 || d.right > 0.99;
+    final sideView = (d.centerX - 0.5).abs() > 0.18;
+    double dist;
+    if (cutTop && !cutSide) {
+      dist = dW;
+    } else if (cutSide || sideView) {
+      dist = dH; // box also contains the car's flank: width would lie
+    } else {
+      dist = (dW + dH) / 2;
+    }
+    dist = dist.clamp(2.0, 120.0);
+    // Lateral position from the box edge nearest to the image centre:
+    // that edge is the car's near corner, the rest of the box is its flank.
+    final halfW = typicalWidthM(d.kind) / 2;
+    double lateral;
+    if (identical(d, lead) || !sideView) {
+      lateral = (d.centerX - 0.5) / fx * dist;
+    } else if (d.centerX > 0.5) {
+      lateral = (d.left - 0.5) / fx * dist + halfW;
+    } else {
+      lateral = (d.right - 0.5) / fx * dist - halfW;
+    }
     out.add(RoadObject(detection: d, distanceM: dist, lateralM: lateral, isLead: identical(d, lead)));
   }
   return out;
 }
 
-/// The vehicle directly ahead: a vehicle in the central corridor,
-/// the one closest to the camera (lowest bottom edge).
-Detection? selectLead(List<Detection> dets) {
+/// Where a vehicle at [distanceM] ahead and [lateralM] to the right would
+/// appear in the image (used by the demo and tests). Null when not visible.
+Detection? projectToImage(VehicleKind kind, double distanceM, double lateralM,
+    {CameraModel camera = CameraModel.landscape, double score = 0.9}) {
+  if (distanceM < 2) return null;
+  final fx = camera.fx, fy = camera.fy;
+  final cx = 0.5 + lateralM * fx / distanceM;
+  final w = typicalWidthM(kind) * fx / distanceM;
+  final h = typicalHeightM(kind) * fy / distanceM;
+  final bottom = 0.5 + CameraModel.mountHeight * fy / distanceM;
+  final left = cx - w / 2, right = cx + w / 2, top = bottom - h;
+  if (right < 0.02 || left > 0.98) return null;
+  return Detection(
+    kind: kind,
+    score: score,
+    left: left.clamp(0.0, 1.0),
+    right: right.clamp(0.0, 1.0),
+    top: top.clamp(0.0, 1.0),
+    bottom: bottom.clamp(0.0, 1.0),
+  );
+}
+
+/// The vehicle directly ahead: a vehicle whose estimated lateral position
+/// is inside the own lane, the nearest one. Parked cars at the roadside
+/// can look central in the image when far away, so the decision uses the
+/// position on the road, not just the image position.
+Detection? selectLead(List<Detection> dets, {CameraModel camera = CameraModel.landscape}) {
   Detection? best;
+  double bestD = double.infinity;
   for (final d in dets) {
     if (!d.isVehicle || d.kind == VehicleKind.bicycle) continue;
-    // Corridor: box must overlap the middle 30% and its centre must be central.
-    if (d.right < 0.35 || d.left > 0.65) continue;
-    if ((d.centerX - 0.5).abs() > 0.22) continue;
-    if (best == null || d.bottom > best.bottom) best = d;
+    if (d.height <= 0.01 || d.left < 0.01 || d.right > 0.99) continue;
+    final dist = typicalHeightM(d.kind) * camera.fy / d.height;
+    final lateral = (d.centerX - 0.5) / camera.fx * dist;
+    if (lateral.abs() > 1.3) continue;
+    if (dist < bestD) {
+      bestD = dist;
+      best = d;
+    }
   }
   return best;
 }

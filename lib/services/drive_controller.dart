@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/lanes.dart';
+import '../core/road_map.dart';
 import '../core/speed_limit.dart';
 import '../core/vehicles.dart';
 import 'alerts.dart';
@@ -38,6 +39,12 @@ class DriveController extends ChangeNotifier {
   bool get overspeed => _overspeed.isOver;
   List<RoadObject> road = const [];
   LaneInfo lanes = LaneInfo.unknown;
+
+  /// Roads around the car from OpenStreetMap, in the car's frame, and when
+  /// they were computed (the view moves them along between GPS fixes).
+  List<EgoRoad> roads = const [];
+  DateTime roadsAt = DateTime.now();
+  double? _heading;
   RoadObject? get lead => road.where((r) => r.isLead).firstOrNull;
   DateTime? departureAlertAt;
   int inferenceMs = 0;
@@ -102,6 +109,8 @@ class DriveController extends ChangeNotifier {
     departureAlertAt = null;
     _departure.reset();
     _lanes.reset();
+    roads = const [];
+    _heading = null;
     lanes = LaneInfo.unknown;
     _osmLanes = null;
     _demo = null;
@@ -123,8 +132,11 @@ class DriveController extends ChangeNotifier {
     hasGps = true;
     _demoTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       final d = _demo!;
+      d.tick(0.2);
       _applySpeed(d.speedKmh, d.limit, d.roadName);
-      _applyFrame(d.detections, portrait: false);
+      _applyFrame(d.detections, CameraModel.landscape);
+      roads = d.roads;
+      roadsAt = DateTime.now();
       lanes = d.lanes;
       brightness.addSample(d.luma);
       notifyListeners();
@@ -138,7 +150,28 @@ class DriveController extends ChangeNotifier {
     final newLimit = m == null ? null : limitFromTags(m.way.tags, forward: m.forward);
     _osmLanes = m == null ? null : lanesForDirection(m.way.tags, forward: m.forward, oneway: m.way.oneway);
     _applySpeed(f.speedKmh, newLimit, m?.way.name);
+    _updateRoads(f, m);
     notifyListeners();
+  }
+
+  void _updateRoads(GpsFix f, WayMatch? m) {
+    var h = f.headingDeg ?? _heading;
+    // Use the road's own direction when we are on it: steadier than GPS.
+    final seg = m?.segmentBearingDeg;
+    if (seg != null && h != null) {
+      final back = (seg + 180) % 360;
+      double diff(double a, double b) {
+        final x = ((a - b) % 360 + 360) % 360;
+        return x > 180 ? 360 - x : x;
+      }
+
+      h = diff(seg, h) <= diff(back, h) ? seg : back;
+    }
+    if (h == null) return; // direction unknown until we drive a bit
+    _heading = h;
+    final pos = m?.closest ?? LatLon(f.lat, f.lon);
+    roads = roadsAroundEgo(limits.ways, pos, h, currentWayId: m?.way.id);
+    roadsAt = DateTime.now();
   }
 
   void _applySpeed(double kmh, SpeedLimit? newLimit, String? name) {
@@ -159,13 +192,13 @@ class DriveController extends ChangeNotifier {
   void _onFrame(FrameResult r) {
     inferenceMs = r.inferenceMs;
     brightness.addSample(r.luma);
-    _applyFrame(r.detections, portrait: r.portrait);
+    _applyFrame(r.detections, r.camera);
     lanes = _lanes.update(r.lanes, osmCount: _osmLanes);
     notifyListeners();
   }
 
-  void _applyFrame(List<Detection> dets, {required bool portrait}) {
-    road = placeOnRoad(dets, portrait: portrait);
+  void _applyFrame(List<Detection> dets, CameraModel camera) {
+    road = placeOnRoad(dets, camera: camera);
     if (!settings.departureAlert) return;
     final leadDet = lead?.detection;
     if (_departure.update(DateTime.now(), speedKmh, leadDet)) {

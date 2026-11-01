@@ -12,14 +12,14 @@ class FrameResult {
   const FrameResult({
     required this.detections,
     required this.luma,
-    required this.portrait,
+    required this.camera,
     required this.inferenceMs,
     this.lanes = LaneObservation.empty,
   });
   final List<Detection> detections;
   final LaneObservation lanes;
   final double luma; // mean brightness 0..255
-  final bool portrait; // upright image taller than wide
+  final CameraModel camera;
   final int inferenceMs;
 }
 
@@ -123,9 +123,9 @@ class VehicleDetector {
           right: b[3].clamp(0.0, 1.0),
         ));
       }
-      final portrait = (rot == 90 || rot == 270) ? img.width > img.height : img.height > img.width;
+      final upright = (rot == 90 || rot == 270) ? img.height / img.width : img.width / img.height;
       _results.add(FrameResult(
-          detections: dets, luma: prep.luma, portrait: portrait, inferenceMs: sw.elapsedMilliseconds, lanes: lanes));
+          detections: dets, luma: prep.luma, camera: CameraModel(upright), inferenceMs: sw.elapsedMilliseconds, lanes: lanes));
     } catch (e) {
       error = '$e';
     } finally {

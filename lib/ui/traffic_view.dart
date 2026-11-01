@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../core/lanes.dart';
+import '../core/road_map.dart';
+import '../core/scene.dart';
 import '../core/vehicles.dart';
 import 'theme.dart';
 
 /// Animated bird's-eye-behind view of the road, like the display of a
-/// modern car: own car at the bottom, detected vehicles placed ahead.
+/// modern car: own car at the bottom, detected vehicles placed ahead in
+/// their lanes, real side roads from OpenStreetMap around.
 class TrafficView extends StatefulWidget {
   const TrafficView({
     super.key,
@@ -16,31 +19,34 @@ class TrafficView extends StatefulWidget {
     required this.speedKmh,
     required this.departure,
     this.lanes = LaneInfo.unknown,
+    this.roads = const [],
+    this.roadsAt,
   });
   final List<RoadObject> objects;
   final LaneInfo lanes;
   final double speedKmh;
   final bool departure;
+  final List<EgoRoad> roads;
+  final DateTime? roadsAt;
 
   @override
   State<TrafficView> createState() => _TrafficViewState();
 }
 
+/// Snapshot of a track for painting.
 class _Tracked {
-  _Tracked(this.kind, this.lateral, this.distance);
-  VehicleKind kind;
-  double lateral, distance;
-  double targetLateral = 0, targetDistance = 0;
-  double opacity = 0;
-  bool alive = true;
-  bool isLead = false;
+  _Tracked(this.kind, this.lateral, this.distance, this.isLead, this.opacity);
+  final VehicleKind kind;
+  final double lateral, distance;
+  final bool isLead;
+  final double opacity;
 }
 
 class _TrafficViewState extends State<TrafficView> with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   Duration _last = Duration.zero;
   double _travelled = 0;
-  final List<_Tracked> _tracked = [];
+  final _scene = SceneTracker();
 
   @override
   void initState() {
@@ -51,31 +57,9 @@ class _TrafficViewState extends State<TrafficView> with SingleTickerProviderStat
   @override
   void didUpdateWidget(TrafficView old) {
     super.didUpdateWidget(old);
-    if (!identical(old.objects, widget.objects)) _match(widget.objects);
-  }
-
-  void _match(List<RoadObject> objs) {
-    for (final t in _tracked) {
-      t.alive = false;
-    }
-    for (final o in objs) {
-      _Tracked? best;
-      var bestD = 6.0;
-      for (final t in _tracked) {
-        if (t.alive) continue;
-        final d = (t.targetLateral - o.lateralM).abs() + (t.targetDistance - o.distanceM).abs() * 0.25;
-        if (d < bestD) {
-          bestD = d;
-          best = t;
-        }
-      }
-      best ??= (_Tracked(o.kind, o.lateralM, o.distanceM)..opacity = 0).also(_tracked.add);
-      best
-        ..alive = true
-        ..kind = o.kind
-        ..isLead = o.isLead
-        ..targetLateral = o.lateralM
-        ..targetDistance = o.distanceM;
+    _scene.setLayout(LaneLayout.from(widget.lanes));
+    if (!identical(old.objects, widget.objects)) {
+      _scene.update(widget.objects, DateTime.now(), widget.speedKmh);
     }
   }
 
@@ -83,13 +67,7 @@ class _TrafficViewState extends State<TrafficView> with SingleTickerProviderStat
     final dt = _last == Duration.zero ? 0.016 : (now - _last).inMicroseconds / 1e6;
     _last = now;
     _travelled += widget.speedKmh / 3.6 * dt;
-    final k = 1 - math.exp(-dt * 6);
-    for (final t in _tracked) {
-      t.lateral += (t.targetLateral - t.lateral) * k;
-      t.distance += (t.targetDistance - t.distance) * k;
-      t.opacity = (t.opacity + (t.alive ? dt * 4 : -dt * 3)).clamp(0.0, 1.0);
-    }
-    _tracked.removeWhere((t) => !t.alive && t.opacity <= 0);
+    _scene.predict(DateTime.now(), widget.speedKmh);
     setState(() {});
   }
 
@@ -101,23 +79,20 @@ class _TrafficViewState extends State<TrafficView> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    final at = widget.roadsAt;
+    final shift = at == null ? 0.0 : (DateTime.now().difference(at).inMilliseconds / 1000.0).clamp(0.0, 2.0) * widget.speedKmh / 3.6;
     return CustomPaint(
       painter: _RoadPainter(
-        tracked: List.of(_tracked),
+        tracked: [for (final t in _scene.tracks) _Tracked(t.kind, t.x, t.d, t.isLead, t.opacity)],
         travelled: _travelled,
         speedKmh: widget.speedKmh,
         departure: widget.departure,
         lanes: widget.lanes,
+        roads: widget.roads,
+        roadShift: shift,
       ),
       size: Size.infinite,
     );
-  }
-}
-
-extension<T> on T {
-  T also(void Function(T) f) {
-    f(this);
-    return this;
   }
 }
 
@@ -128,9 +103,13 @@ class _RoadPainter extends CustomPainter {
     required this.speedKmh,
     required this.departure,
     required this.lanes,
+    required this.roads,
+    required this.roadShift,
   });
   final List<_Tracked> tracked;
   final LaneInfo lanes;
+  final List<EgoRoad> roads;
+  final double roadShift;
   final double travelled;
   final double speedKmh;
   final bool departure;
@@ -163,6 +142,8 @@ class _RoadPainter extends CustomPainter {
         end: Alignment.bottomCenter,
         colors: [Color(0xFF0D1520), C.bg],
       ).createShader(Offset.zero & size));
+
+    _drawMapRoads(canvas);
 
     // Lane lines: (lateral position in m, type). Own lane centre = 0.
     const lw = 3.6;
@@ -258,6 +239,57 @@ class _RoadPainter extends CustomPainter {
 
     // Own car.
     _drawVehicle(canvas, VehicleKind.car, 0, 0, C.text, 1, own: true);
+  }
+
+  /// Real roads from OpenStreetMap as flat ribbons on the ground.
+  void _drawMapRoads(Canvas canvas) {
+    final near = -_c * 0.7;
+    final fill = Paint();
+    final edge = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = const Color(0xFF2C3A4B);
+    final labels = <(Offset, String)>[];
+    for (final r in roads) {
+      final pts = [for (final (x, d) in r.points) (x, d - roadShift)];
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var (ax, ad) = pts[i];
+        var (bx, bd) = pts[i + 1];
+        if ((ad < near && bd < near) || (ad > _maxD && bd > _maxD)) continue;
+        // Clip the segment to the visible depth range.
+        (double, double) at(double d) {
+          final t = (d - ad) / (bd - ad);
+          return (ax + (bx - ax) * t, d);
+        }
+
+        if (ad < near) (ax, ad) = at(near);
+        if (bd < near) (bx, bd) = at(near);
+        if (ad > _maxD) (ax, ad) = at(_maxD);
+        if (bd > _maxD) (bx, bd) = at(_maxD);
+        final len = math.sqrt((bx - ax) * (bx - ax) + (bd - ad) * (bd - ad));
+        if (len < 0.01) continue;
+        final nx = -(bd - ad) / len * r.widthM / 2, nd = (bx - ax) / len * r.widthM / 2;
+        final alpha = _fade(math.min(ad, bd));
+        final quad = Path()
+          ..moveTo(_p(ax + nx, ad + nd).dx, _p(ax + nx, ad + nd).dy)
+          ..lineTo(_p(bx + nx, bd + nd).dx, _p(bx + nx, bd + nd).dy)
+          ..lineTo(_p(bx - nx, bd - nd).dx, _p(bx - nx, bd - nd).dy)
+          ..lineTo(_p(ax - nx, ad - nd).dx, _p(ax - nx, ad - nd).dy)
+          ..close();
+        canvas.drawPath(quad, fill..color = const Color(0xFF1B2430).withValues(alpha: alpha));
+        canvas.drawPath(quad, edge..color = const Color(0xFF3A4A5E).withValues(alpha: alpha));
+        if (!r.current && r.name != null && i == 0 && ad > 8 && ad < 50 && ax.abs() < 30) {
+          labels.add((_p(ax + (bx - ax) * 0.3, ad + (bd - ad) * 0.3), r.name!));
+        }
+      }
+    }
+    for (final (pos, text) in labels) {
+      final tp = TextPainter(
+        text: TextSpan(text: text, style: TextStyle(color: C.dim, fontSize: math.max(11, _h * 0.03), fontFamily: 'Roboto')),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(pos.dx - tp.width / 2, pos.dy - tp.height - 2));
+    }
   }
 
   double _fade(double d) => (1 - (d - 45) / 25).clamp(0.0, 1.0);

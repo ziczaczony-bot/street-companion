@@ -25,6 +25,7 @@ class SpeedLimitService {
   int _endpointIndex = 0;
 
   bool get hasData => _ways.isNotEmpty;
+  List<Way> get ways => _ways;
   bool get loading => _loading;
 
   WayMatch? _lastMatch;

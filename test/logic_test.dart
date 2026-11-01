@@ -83,6 +83,15 @@ void main() {
     expect(t.update(200, const SpeedLimit(unlimited: true), 3), isFalse);
   });
 
+  test('projection round trip, also for cars seen from the side', () {
+    for (final (d, x) in [(10.0, 0.0), (20.0, -3.6), (6.0, 3.2), (15.0, 3.6)]) {
+      final det = projectToImage(VehicleKind.car, d, x)!;
+      final o = placeOnRoad([det]).single;
+      expect(o.distanceM, closeTo(d, d * 0.12), reason: 'distance for ($d, $x)');
+      expect(o.lateralM, closeTo(x, 0.8), reason: 'lateral for ($d, $x)');
+    }
+  });
+
   group('DepartureMonitor', () {
     Detection car(double w) =>
         Detection(kind: VehicleKind.car, score: 0.9, left: 0.5 - w / 2, right: 0.5 + w / 2, top: 0.4, bottom: 0.4 + w * 0.7);
@@ -156,8 +165,12 @@ void main() {
     const ahead = Detection(kind: VehicleKind.car, score: 0.9, left: 0.4, right: 0.6, top: 0.4, bottom: 0.6);
     expect(selectLead([left, ahead]), same(ahead));
     expect(selectLead([left]), isNull);
-    final road = placeOnRoad([ahead], portrait: false);
+    final road = placeOnRoad([ahead]);
     expect(road.single.isLead, isTrue);
-    expect(road.single.distanceM, closeTo(7.0, 0.1));
+    expect(road.single.distanceM, closeTo(7.4, 0.2));
+    // A parked car 20 m ahead at the right kerb looks almost central but is not the lead.
+    final parked = projectToImage(VehicleKind.car, 20, 3.4)!;
+    final lead = projectToImage(VehicleKind.car, 30, 0)!;
+    expect(selectLead([parked, lead]), same(lead));
   });
 }

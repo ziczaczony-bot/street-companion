@@ -228,7 +228,14 @@ class _TrafficCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
         ),
         child: Stack(children: [
-          Positioned.fill(child: TrafficView(objects: d.road, speedKmh: d.speedKmh, departure: departure, lanes: d.lanes)),
+          Positioned.fill(child: TrafficView(
+                objects: d.road,
+                speedKmh: d.speedKmh,
+                departure: departure,
+                lanes: d.lanes,
+                roads: d.roads,
+                roadsAt: d.roadsAt,
+              )),
           if (d.settings.showPreview && cam != null && cam.value.isInitialized)
             Positioned(
               left: 12,

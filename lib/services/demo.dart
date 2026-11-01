@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../core/lanes.dart';
+import '../core/road_map.dart';
 import '../core/speed_limit.dart';
 import '../core/vehicles.dart';
 
@@ -43,36 +44,70 @@ class DemoDrive {
     return 'A 8';
   }
 
-  /// Fake detections in upright image coordinates.
+  /// Metres driven; advanced by [tick].
+  double travelled = 0;
+  void tick(double dtSeconds) => travelled += speedKmh / 3.6 * dtSeconds;
+
+  /// Fake camera detections, made by projecting a small simulated world
+  /// (lead car, parked cars, oncoming and overtaken traffic) into the image.
   List<Detection> get detections {
     final t = _t;
     final out = <Detection>[];
-    Detection car(double cx, double w, {VehicleKind k = VehicleKind.car}) {
-      final h = w * (k == VehicleKind.truck ? 1.0 : 0.75);
-      final bottom = 0.5 + w * 0.9;
-      return Detection(kind: k, score: 0.9, left: cx - w / 2, right: cx + w / 2, top: bottom - h, bottom: bottom);
+    void add(VehicleKind k, double d, double x) {
+      final det = projectToImage(k, d, x);
+      if (det != null) out.add(det);
     }
 
-    // Lead car: approaches while we brake, waits, drives off at t = 44.
-    double leadW;
+    // Lead car in our lane: approaches while we brake, waits, drives off at 44 s.
+    double leadD;
     if (t < 30) {
-      leadW = 0.05 + 0.01 * math.sin(t / 3);
+      leadD = 28 + 3 * math.sin(t / 3);
     } else if (t < 36) {
-      leadW = 0.05 + (t - 30) / 6 * 0.27;
+      leadD = 28 - (t - 30) / 6 * 22;
     } else if (t < 44) {
-      leadW = 0.32;
+      leadD = 6;
     } else if (t < 52) {
-      leadW = math.max(0.06, 0.32 - (t - 44) * 0.05);
+      leadD = 6 + (t - 44) * (t - 44) * 0.6;
     } else {
-      leadW = 0.09;
+      leadD = 40 + 4 * math.sin(t / 4);
     }
-    out.add(car(0.5, leadW));
-    // Oncoming / neighbour traffic.
-    final phase = (t * 0.35) % 1.0;
-    out.add(car(0.18 - phase * 0.15, 0.05 + phase * 0.18));
-    if (t > 50) {
-      final p2 = ((t - 50) * 0.2) % 1.0;
-      out.add(car(0.22, 0.04 + p2 * 0.06, k: VehicleKind.truck));
+    add(VehicleKind.car, leadD, 0);
+
+    if (t < 50) {
+      // Town: cars parked on the right every 7 m (with gaps), fixed in the world.
+      final s0 = travelled;
+      for (var i = (s0 / 7).floor(); i < (s0 + 45) / 7; i++) {
+        if (i % 5 == 3 || i % 7 == 1) continue; // gaps / driveways
+        add(i % 6 == 0 ? VehicleKind.truck : VehicleKind.car, i * 7.0 - s0 + 4, 3.4);
+      }
+      // Oncoming traffic on the left lane at 40 km/h.
+      final phase = (t * 0.25) % 1.0;
+      add(VehicleKind.car, 50 - phase * 60, -3.6);
+    } else {
+      // Motorway: a truck in the right lane that we overtake, a fast car on the left.
+      final idx = lanes.index ?? 2;
+      final rightLaneX = (2 - idx) * 3.6;
+      add(VehicleKind.truck, 45 - (t - 50) * 4.5, rightLaneX == 0 ? 3.6 : rightLaneX);
+      final leftLaneX = (0 - idx) * 3.6;
+      add(VehicleKind.car, 8 + ((t - 50) * 6) % 60, leftLaneX == 0 ? -3.6 : leftLaneX);
+    }
+    return out;
+  }
+
+  /// Side streets every 80 m in town, an exit ramp on the motorway.
+  List<EgoRoad> get roads {
+    final t = _t;
+    final out = <EgoRoad>[
+      const EgoRoad(points: [(0.0, -60.0), (0.0, 200.0)], widthM: 9, current: true),
+    ];
+    if (t < 50) {
+      for (var k = (travelled / 80).floor(); k < (travelled + 160) / 80; k++) {
+        final d = k * 80.0 - travelled + 30;
+        out.add(EgoRoad(points: [(-90.0, d), (90.0, d)], widthM: 6, name: 'Gartenstraße'));
+      }
+    } else {
+      final d = 160 - (t - 50) * 20;
+      out.add(EgoRoad(points: [(8.0, d), (14.0, d + 40), (30.0, d + 90)], widthM: 5, name: 'Ausfahrt'));
     }
     return out;
   }

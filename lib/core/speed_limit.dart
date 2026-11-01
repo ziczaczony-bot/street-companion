@@ -125,10 +125,16 @@ class Way {
 }
 
 class WayMatch {
-  const WayMatch(this.way, this.distanceM, this.forward);
+  const WayMatch(this.way, this.distanceM, this.forward, {this.closest, this.segmentBearingDeg});
   final Way way;
   final double distanceM;
   final bool forward;
+
+  /// Nearest point on the road (the car snapped onto it).
+  final LatLon? closest;
+
+  /// Bearing of the road segment in the way's node order (0 = north).
+  final double? segmentBearingDeg;
 }
 
 const double _earthR = 6371000.0;
@@ -167,7 +173,13 @@ WayMatch? matchWay(List<Way> ways, LatLon pos, {double? headingDeg, double maxDi
       final score = dist + penalty;
       if (score < bestScore) {
         bestScore = score;
-        best = WayMatch(way, dist, forward);
+        best = WayMatch(
+          way,
+          dist,
+          forward,
+          closest: LatLon(pos.lat + cy / _earthR * 180 / math.pi, pos.lon + cx / (_earthR * cosLat) * 180 / math.pi),
+          segmentBearingDeg: segBearing,
+        );
       }
     }
   }

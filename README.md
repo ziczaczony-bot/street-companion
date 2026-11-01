@@ -7,7 +7,7 @@ A driving assistant for your phone. Put the phone in a windshield holder with th
 - **Overspeed warning**: the speed turns red and a voice says "Zu schnell" when you are over the limit plus your tolerance (default +3 km/h).
 - **Vehicle detection** with the camera, on the phone itself. Nothing is recorded, stored or uploaded.
 - **"Vorderfahrzeug fährt an"**: when you are standing (e.g. at a red light) and the car in front drives off, you get a green banner and a voice hint.
-- **Animated traffic view** of the cars around you, with the distance to the car ahead (turns amber when closer than "halber Tacho").
+- **Animated traffic view** of the cars around you, with the distance to the car ahead (turns amber when closer than "halber Tacho"). Each car stays in its lane or in the parking strip; parked cars slide backwards as you drive past. Real side roads around you are drawn from OpenStreetMap using your GPS position.
 - **Always-on screen** with **automatic brightness** (darker at night and in tunnels).
 - **Which lane you are in** (left, middle, right) and **how many lanes** the road has, from the camera's view of the lane markings (solid vs dashed) plus the lane count in OpenStreetMap.
 - **Demo mode** to try everything at home without driving.
