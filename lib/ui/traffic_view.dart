@@ -3,14 +3,22 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../core/lanes.dart';
 import '../core/vehicles.dart';
 import 'theme.dart';
 
 /// Animated bird's-eye-behind view of the road, like the display of a
 /// modern car: own car at the bottom, detected vehicles placed ahead.
 class TrafficView extends StatefulWidget {
-  const TrafficView({super.key, required this.objects, required this.speedKmh, required this.departure});
+  const TrafficView({
+    super.key,
+    required this.objects,
+    required this.speedKmh,
+    required this.departure,
+    this.lanes = LaneInfo.unknown,
+  });
   final List<RoadObject> objects;
+  final LaneInfo lanes;
   final double speedKmh;
   final bool departure;
 
@@ -99,6 +107,7 @@ class _TrafficViewState extends State<TrafficView> with SingleTickerProviderStat
         travelled: _travelled,
         speedKmh: widget.speedKmh,
         departure: widget.departure,
+        lanes: widget.lanes,
       ),
       size: Size.infinite,
     );
@@ -113,8 +122,15 @@ extension<T> on T {
 }
 
 class _RoadPainter extends CustomPainter {
-  _RoadPainter({required this.tracked, required this.travelled, required this.speedKmh, required this.departure});
+  _RoadPainter({
+    required this.tracked,
+    required this.travelled,
+    required this.speedKmh,
+    required this.departure,
+    required this.lanes,
+  });
   final List<_Tracked> tracked;
+  final LaneInfo lanes;
   final double travelled;
   final double speedKmh;
   final bool departure;
@@ -148,13 +164,30 @@ class _RoadPainter extends CustomPainter {
         colors: [Color(0xFF0D1520), C.bg],
       ).createShader(Offset.zero & size));
 
+    // Lane lines: (lateral position in m, type). Own lane centre = 0.
+    const lw = 3.6;
+    final lines = <(double, LineType)>[];
+    final count = lanes.count, index = lanes.index;
+    if (count != null && count > 1 && index != null) {
+      for (var i = 0; i <= count; i++) {
+        final x = (i - index - 0.5) * lw;
+        lines.add((x, (i == 0 || i == count) ? LineType.solid : LineType.dashed));
+      }
+    } else {
+      // Unknown or one lane per direction: own lane plus oncoming lane on the left.
+      lines.add((-1.5 * lw, LineType.solid));
+      lines.add((-0.5 * lw, lanes.left == LineType.solid ? LineType.solid : LineType.dashed));
+      lines.add((0.5 * lw, count == 1 || lanes.right == LineType.solid ? LineType.solid : LineType.dashed));
+      if (count == null) lines.add((1.5 * lw, LineType.solid));
+    }
+    final leftX = lines.first.$1 - 1.0, rightX = lines.last.$1 + 1.0;
+
     // Road surface.
-    const half = 7.0;
     final road = Path()
-      ..moveTo(_p(-half, _maxD).dx, _p(-half, _maxD).dy)
-      ..lineTo(_p(half, _maxD).dx, _p(half, _maxD).dy)
-      ..lineTo(_p(half, -_c * 0.75).dx, _p(half, -_c * 0.75).dy)
-      ..lineTo(_p(-half, -_c * 0.75).dx, _p(-half, -_c * 0.75).dy)
+      ..moveTo(_p(leftX, _maxD).dx, _p(leftX, _maxD).dy)
+      ..lineTo(_p(rightX, _maxD).dx, _p(rightX, _maxD).dy)
+      ..lineTo(_p(rightX, -_c * 0.75).dx, _p(rightX, -_c * 0.75).dy)
+      ..lineTo(_p(leftX, -_c * 0.75).dx, _p(leftX, -_c * 0.75).dy)
       ..close();
     canvas.drawPath(road, Paint()
       ..shader = LinearGradient(
@@ -163,24 +196,23 @@ class _RoadPainter extends CustomPainter {
         colors: [const Color(0xFF111821).withValues(alpha: 0.2), const Color(0xFF18212C)],
       ).createShader(Offset.zero & size));
 
-    // Edge lines.
-    final edge = Paint()
-      ..color = const Color(0xFF55657A)
-      ..strokeWidth = 2;
-    for (final x in [-5.4, 5.4]) {
-      canvas.drawLine(_p(x, _maxD), _p(x, -_c * 0.7), edge);
-    }
-    // Moving lane dashes.
+    final solid = Paint()
+      ..color = const Color(0xFF6A7B90)
+      ..strokeWidth = 2.5;
     final dash = Paint()..color = const Color(0xFF8495AA);
     const period = 12.0, len = 4.0;
     final off = travelled % period;
-    for (final x in [-1.8, 1.8]) {
+    for (final (x, type) in lines) {
+      if (type == LineType.solid) {
+        canvas.drawLine(_p(x, _maxD), _p(x, -_c * 0.7), solid);
+        continue;
+      }
+      // Moving dashes.
       for (var d = -off - period; d < _maxD; d += period) {
         final d0 = math.max(d, -_c * 0.7), d1 = math.min(d + len, _maxD);
         if (d1 <= d0) continue;
-        final a = _p(x, d0), b = _p(x, d1);
         dash.strokeWidth = (0.15 * _scale(d0)).clamp(1.0, 5.0);
-        canvas.drawLine(a, b, dash..color = const Color(0xFF8495AA).withValues(alpha: _fade(d0)));
+        canvas.drawLine(_p(x, d0), _p(x, d1), dash..color = const Color(0xFF8495AA).withValues(alpha: _fade(d0)));
       }
     }
 

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../core/lanes.dart';
 import '../core/speed_limit.dart';
 import '../core/vehicles.dart';
 
@@ -32,14 +33,14 @@ class DemoDrive {
     if (t < 18) return const SpeedLimit(kmh: 50);
     if (t < 40) return const SpeedLimit(kmh: 30);
     if (t < 50) return const SpeedLimit(kmh: 50);
-    return const SpeedLimit(kmh: 100);
+    return const SpeedLimit(kmh: 120);
   }
 
   String get roadName {
     final t = _t;
     if (t < 18) return 'Hauptstraße';
     if (t < 50) return 'Schulweg';
-    return 'L 1140';
+    return 'A 8';
   }
 
   /// Fake detections in upright image coordinates.
@@ -71,9 +72,18 @@ class DemoDrive {
     out.add(car(0.18 - phase * 0.15, 0.05 + phase * 0.18));
     if (t > 50) {
       final p2 = ((t - 50) * 0.2) % 1.0;
-      out.add(car(0.85, 0.04 + p2 * 0.06, k: VehicleKind.truck));
+      out.add(car(0.22, 0.04 + p2 * 0.06, k: VehicleKind.truck));
     }
     return out;
+  }
+
+  /// Town: one lane each way. Motorway (from 50 s): three lanes, joining
+  /// on the right and changing to the middle lane at 60 s.
+  LaneInfo get lanes {
+    final t = _t;
+    if (t < 50) return const LaneInfo(count: 1, index: 0, left: LineType.dashed, right: LineType.solid);
+    if (t < 60) return const LaneInfo(count: 3, index: 2, left: LineType.dashed, right: LineType.solid);
+    return const LaneInfo(count: 3, index: 1, left: LineType.dashed, right: LineType.dashed);
   }
 
   double get luma => 120;

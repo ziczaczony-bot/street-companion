@@ -5,11 +5,19 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
+import '../core/lanes.dart';
 import '../core/vehicles.dart';
 
 class FrameResult {
-  const FrameResult({required this.detections, required this.luma, required this.portrait, required this.inferenceMs});
+  const FrameResult({
+    required this.detections,
+    required this.luma,
+    required this.portrait,
+    required this.inferenceMs,
+    this.lanes = LaneObservation.empty,
+  });
   final List<Detection> detections;
+  final LaneObservation lanes;
   final double luma; // mean brightness 0..255
   final bool portrait; // upright image taller than wide
   final int inferenceMs;
@@ -90,6 +98,7 @@ class VehicleDetector {
     try {
       final rot = _rotationFor(c);
       final prep = prepareInput(img, rot, _input);
+      final lanes = detectLanes(prep.gray, PreparedInput.grayW, PreparedInput.grayH);
       final boxes = [List.generate(10, (_) => List.filled(4, 0.0))];
       final classes = [List.filled(10, 0.0)];
       final scores = [List.filled(10, 0.0)];
@@ -115,7 +124,8 @@ class VehicleDetector {
         ));
       }
       final portrait = (rot == 90 || rot == 270) ? img.width > img.height : img.height > img.width;
-      _results.add(FrameResult(detections: dets, luma: prep.luma, portrait: portrait, inferenceMs: sw.elapsedMilliseconds));
+      _results.add(FrameResult(
+          detections: dets, luma: prep.luma, portrait: portrait, inferenceMs: sw.elapsedMilliseconds, lanes: lanes));
     } catch (e) {
       error = '$e';
     } finally {
@@ -143,9 +153,13 @@ class VehicleDetector {
 }
 
 class PreparedInput {
-  PreparedInput(this.rgb, this.luma);
+  PreparedInput(this.rgb, this.luma, this.gray);
   final Uint8List rgb;
   final double luma;
+
+  /// Small upright grayscale copy for lane detection.
+  final Uint8List gray;
+  static const grayW = 160, grayH = 120;
 }
 
 /// Scales a camera frame to size x size RGB, rotated upright by [rot]
@@ -171,21 +185,7 @@ PreparedInput prepareInput(CameraImage img, int rot, int size) {
     final vN = (oy + 0.5) / size;
     for (var ox = 0; ox < size; ox++) {
       final uN = (ox + 0.5) / size;
-      double sxN, syN;
-      switch (rot) {
-        case 90:
-          sxN = vN;
-          syN = 1 - uN;
-        case 180:
-          sxN = 1 - uN;
-          syN = 1 - vN;
-        case 270:
-          sxN = 1 - vN;
-          syN = uN;
-        default:
-          sxN = uN;
-          syN = vN;
-      }
+      final (sxN, syN) = _rotate(uN, vN, rot);
       final sx = (sxN * w).toInt().clamp(0, w - 1);
       final sy = (syN * h).toInt().clamp(0, h - 1);
       int r, g, b;
@@ -217,5 +217,32 @@ PreparedInput prepareInput(CameraImage img, int rot, int size) {
       out[o++] = b;
     }
   }
-  return PreparedInput(out, lumaN == 0 ? 128 : lumaSum / lumaN);
+  // Grayscale copy for lane-marking detection.
+  const gw = PreparedInput.grayW, gh = PreparedInput.grayH;
+  final gray = Uint8List(gw * gh);
+  var gi = 0;
+  for (var oy = 0; oy < gh; oy++) {
+    final vN = (oy + 0.5) / gh;
+    for (var ox = 0; ox < gw; ox++) {
+      final uN = (ox + 0.5) / gw;
+      final (sxN, syN) = _rotate(uN, vN, rot);
+      final sx = (sxN * w).toInt().clamp(0, w - 1);
+      final sy = (syN * h).toInt().clamp(0, h - 1);
+      if (yuv) {
+        gray[gi++] = y[sy * yRow + sx];
+      } else {
+        final i = sy * yRow + sx * 4;
+        gray[gi++] = (y[i + 2] * 299 + y[i + 1] * 587 + y[i] * 114) ~/ 1000;
+      }
+    }
+  }
+  return PreparedInput(out, lumaN == 0 ? 128 : lumaSum / lumaN, gray);
 }
+
+/// Maps upright normalised coordinates to sensor coordinates.
+(double, double) _rotate(double uN, double vN, int rot) => switch (rot) {
+      90 => (vN, 1 - uN),
+      180 => (1 - uN, 1 - vN),
+      270 => (1 - vN, uN),
+      _ => (uN, vN),
+    };

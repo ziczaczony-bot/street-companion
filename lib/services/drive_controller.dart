@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../core/lanes.dart';
 import '../core/speed_limit.dart';
 import '../core/vehicles.dart';
 import 'alerts.dart';
@@ -25,6 +26,8 @@ class DriveController extends ChangeNotifier {
   final brightness = AutoBrightness();
   final _overspeed = OverspeedTracker();
   final _departure = DepartureMonitor();
+  final _lanes = LaneTracker();
+  int? _osmLanes;
 
   // What the dashboard shows.
   double speedKmh = 0;
@@ -34,6 +37,7 @@ class DriveController extends ChangeNotifier {
   String? roadName;
   bool get overspeed => _overspeed.isOver;
   List<RoadObject> road = const [];
+  LaneInfo lanes = LaneInfo.unknown;
   RoadObject? get lead => road.where((r) => r.isLead).firstOrNull;
   DateTime? departureAlertAt;
   int inferenceMs = 0;
@@ -97,6 +101,9 @@ class DriveController extends ChangeNotifier {
     road = const [];
     departureAlertAt = null;
     _departure.reset();
+    _lanes.reset();
+    lanes = LaneInfo.unknown;
+    _osmLanes = null;
     _demo = null;
   }
 
@@ -118,6 +125,7 @@ class DriveController extends ChangeNotifier {
       final d = _demo!;
       _applySpeed(d.speedKmh, d.limit, d.roadName);
       _applyFrame(d.detections, portrait: false);
+      lanes = d.lanes;
       brightness.addSample(d.luma);
       notifyListeners();
     });
@@ -128,6 +136,7 @@ class DriveController extends ChangeNotifier {
     gpsStatus = GpsStatus.ok;
     final m = limits.update(LatLon(f.lat, f.lon), headingDeg: f.headingDeg);
     final newLimit = m == null ? null : limitFromTags(m.way.tags, forward: m.forward);
+    _osmLanes = m == null ? null : lanesForDirection(m.way.tags, forward: m.forward, oneway: m.way.oneway);
     _applySpeed(f.speedKmh, newLimit, m?.way.name);
     notifyListeners();
   }
@@ -151,6 +160,7 @@ class DriveController extends ChangeNotifier {
     inferenceMs = r.inferenceMs;
     brightness.addSample(r.luma);
     _applyFrame(r.detections, portrait: r.portrait);
+    lanes = _lanes.update(r.lanes, osmCount: _osmLanes);
     notifyListeners();
   }
 

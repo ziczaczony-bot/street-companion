@@ -1,4 +1,4 @@
-name: Build Android app
+name: Build app
 
 on:
   push:
@@ -60,3 +60,21 @@ jobs:
             Android app, built automatically from commit ${{ github.sha }}.
             On your phone: download **street-companion.apk** below and open it.
           files: street-companion.apk
+
+  # Checks that the iPhone version compiles. Installing on an iPhone needs
+  # Apple signing, see docs/INSTALL_IPHONE.md.
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.9'
+          cache: true
+
+      - name: Build iOS app (unsigned)
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign

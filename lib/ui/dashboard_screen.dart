@@ -166,7 +166,7 @@ class _SpeedPanel extends StatelessWidget {
         );
         final status = Text(
           _statusText(),
-          maxLines: 2,
+          maxLines: 3,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: TextStyle(color: over ? C.danger : C.dim, fontSize: 15, fontWeight: over ? FontWeight.w700 : FontWeight.w400),
@@ -203,8 +203,11 @@ class _SpeedPanel extends StatelessWidget {
       case GpsStatus.ok:
         break;
     }
-    if (d.limit?.unlimited == true) return '${d.roadName ?? 'Autobahn'} · Richtgeschw. 130';
-    return d.roadName ?? (d.limit == null ? 'Tempolimit unbekannt' : '');
+    final lane = d.lanes.label;
+    final road = d.limit?.unlimited == true
+        ? '${d.roadName ?? 'Autobahn'} · Richtgeschw. 130'
+        : (d.roadName ?? (d.limit == null ? 'Tempolimit unbekannt' : ''));
+    return lane == null ? road : '$road\n$lane';
   }
 }
 
@@ -225,7 +228,7 @@ class _TrafficCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
         ),
         child: Stack(children: [
-          Positioned.fill(child: TrafficView(objects: d.road, speedKmh: d.speedKmh, departure: departure)),
+          Positioned.fill(child: TrafficView(objects: d.road, speedKmh: d.speedKmh, departure: departure, lanes: d.lanes)),
           if (d.settings.showPreview && cam != null && cam.value.isInitialized)
             Positioned(
               left: 12,

@@ -63,7 +63,9 @@ void main() {
     }
 
     await shot('dashboard_portrait', const Size(400, 860), const Duration(seconds: 10));
-    await shot('dashboard_landscape', const Size(860, 400), const Duration(seconds: 52));
+    await shot('dashboard_landscape', const Size(860, 400), const Duration(seconds: 15));
+    await shot('lanes_right', const Size(860, 400), const Duration(seconds: 55));
+    await shot('lanes_middle', const Size(860, 400), const Duration(seconds: 64));
     await shot('overspeed', const Size(860, 400), const Duration(seconds: 19));
     await shot('departure', const Size(860, 400), const Duration(seconds: 41), waitMs: 5500);
     await tester.pumpWidget(const SizedBox());
