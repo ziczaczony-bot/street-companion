@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../core/link.dart';
 import '../core/vehicles.dart';
 import '../services/drive_controller.dart';
 import '../services/location_service.dart';
@@ -46,6 +47,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     await d.stop();
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(settings: d.settings)));
+    // Switched to camera phone: the app shows the camera screen instead.
+    if (!mounted || d.settings.role == DeviceRole.camera) return;
     await d.restart();
   }
 
@@ -98,7 +101,7 @@ class _TopBar extends StatelessWidget {
       GpsStatus.searching || GpsStatus.starting => C.warn,
       _ => C.danger,
     };
-    final camColor = switch (d.detector.status) {
+    final camColor = switch (d.cameraStatus) {
       CameraStatus.running => C.ok,
       CameraStatus.starting => C.warn,
       CameraStatus.off => C.dim,
@@ -280,7 +283,13 @@ class _TrafficCard extends StatelessWidget {
   }
 
   String? _cameraHint() {
-    if (d.demo || !d.settings.cameraEnabled) return null;
+    if (d.demo) return null;
+    if (d.remoteCamera) {
+      if (d.receiver.error != null) return 'Verbindung zum Kamera-Handy nicht möglich: ${d.receiver.error}';
+      if (d.receiver.connected) return null;
+      return 'Warte auf das Kamera-Handy …\nHotspot an diesem Handy einschalten und das Kamera-Handy damit verbinden.';
+    }
+    if (!d.settings.cameraEnabled) return null;
     return switch (d.detector.status) {
       CameraStatus.denied => 'Kamera-Zugriff erlauben, damit Fahrzeuge erkannt werden.',
       CameraStatus.error => 'Kamera-Fehler: ${d.detector.error ?? ''}',

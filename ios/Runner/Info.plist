@@ -4,6 +4,8 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Die Kamera erkennt Fahrzeuge vor Ihnen. Bilder werden nur auf dem Gerät ausgewertet und nicht gespeichert.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Im Zwei-Handy-Modus sendet das Kamera-Handy erkannte Fahrzeuge über den Hotspot an das Anzeige-Handy. Es werden keine Bilder übertragen.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Der Standort wird für Geschwindigkeit und Tempolimit benötigt.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

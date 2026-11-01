@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/link.dart';
 import 'services/drive_controller.dart';
 import 'services/settings.dart';
+import 'ui/camera_mode_screen.dart';
 import 'ui/dashboard_screen.dart';
 import 'ui/disclaimer_screen.dart';
 import 'ui/theme.dart';
@@ -43,7 +45,13 @@ class _StreetCompanionAppState extends State<StreetCompanionApp> {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: widget.settings.acceptedDisclaimer
-          ? DashboardScreen(drive: _drive)
+          ? ListenableBuilder(
+              listenable: widget.settings,
+              // Camera phone in two-phone mode gets its own simple screen.
+              builder: (context, _) => widget.settings.role == DeviceRole.camera
+                  ? CameraModeScreen(settings: widget.settings)
+                  : DashboardScreen(drive: _drive),
+            )
           : DisclaimerScreen(onAccept: () => setState(() => widget.settings.acceptedDisclaimer = true)),
     );
   }
